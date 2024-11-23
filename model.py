@@ -9,6 +9,7 @@
 #   2) Load the model classes/definition and run training, finally saving the model weights
 #   3) Load the model classes, load the model weights, accept input for seeding prediction and generate results
 
+####################### IMPORT NECESSARY LIBRARIES #######################
 import nltk
 import pandas as pd
 import numpy as np
@@ -17,28 +18,35 @@ import torch
 
 nltk.download('punkt')
 
+####################### MOVE THE TRAINING TO GPU USING .DEVICE #######################
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
+####################### LOAD OUR DATASET AND SPLIT TO TRAIN AND VALIDATION #######################
 splits = {'train': 'nq_open/train-00000-of-00001.parquet', 'validation': 'nq_open/validation-00000-of-00001.parquet'}
 dft = pd.read_parquet("hf://datasets/google-research-datasets/nq_open/" + splits["train"])
 dfv = pd.read_parquet("hf://datasets/google-research-datasets/nq_open/" + splits["validation"])
 df = pd.concat([dft, dfv])
 
+####################### FEATURE ENGINEERING #######################
 df = df.drop(columns=['answer'])
 # print(df.head(10))
 
+####################### TIKTOKEN ENCODING FOR FIRST LEVEL OF ENCODING #######################
 enc = tiktoken.get_encoding("cl100k_base") #loading encoding
 
 DELIMITER = "|"
 
 # This only keeps the first 2k records to make iteration on the model
-# faster. The full training data set will need to be used for real
-# runs of the model.
-training_blob = "|".join(df['question'].to_list()[:2000])
+# faster. The full training data set will need to be used for real runs of the model.
+training_blob = "|".join(df['question'].to_list()[:2000])    # Only uses the first 2000 records for now for faster iterations, NEED TO CHANGE LATER
 TRAINING_SIZE = len(training_blob)
 
 training_blob_encoded = enc.encode(training_blob)
 
 unique_tokens = set(training_blob_encoded)
 
+####################### COMPRESS NUMBER OF TOKENS USED FOR SECOND LEVEL OF ENCODING #######################
 ordnial_to_token = {i: v for i, v in enumerate(sorted(unique_tokens))}
 token_to_ordinal = {v: i for i, v in enumerate(sorted(unique_tokens))}
 
@@ -52,6 +60,7 @@ training_blob_double_encoded = encode_ticktokens(training_blob_encoded)
 
 training_data_tensor = torch.tensor(training_blob_double_encoded, dtype=torch.long)
 
+####################### PERFORM HOLDOUT WITH 10% #######################
 holdout_size = int(len(training_data_tensor) * .1)
 holdout_size
 
@@ -59,9 +68,11 @@ test_data = training_data_tensor[:holdout_size]
 training_data = training_data_tensor[holdout_size:]
 len(test_data), len(training_data)
 
+
 BATCH_SIZE = 4
 BLOCK_SIZE = 8
 
+####################### FUNCTION THAT PREPARES BATCHES OF THE DATASET #######################
 def get_batch(split):
   data = training_data if split == 'train' else test_data
   ix = torch.randint(len(data) - BLOCK_SIZE, (BATCH_SIZE,))
@@ -97,6 +108,7 @@ NUM_EMBEDDINGS = VOCAB_SIZE // 2
 #   model.train()
 #   return out
 
+####################### HEAD COMPONENT #######################
 class Head(nn.Module):
   def __init__(self, head_size):
     super().__init__()
@@ -116,6 +128,7 @@ class Head(nn.Module):
     out = wei @ v
     return out
   
+####################### MULTI-HEAD ATTENTION COMPONENT #######################
 class MultiHeadAttention(nn.Module):
   def __init__(self, num_heads, head_size):
     super().__init__()
@@ -126,7 +139,8 @@ class MultiHeadAttention(nn.Module):
     out = torch.cat([h(x) for h in self.heads], dim=-1)
     out = self.proj(out)
     return out
-  
+
+####################### FEED FORWARD COMPONENT #######################  
 class FeedForward(nn.Module):
   def __init__(self, n_embed):
     super().__init__()
@@ -139,6 +153,7 @@ class FeedForward(nn.Module):
   def forward(self, x):
     return self.net(x)
 
+####################### TRANSFORMER BLOCK USING MULTI-HEAD ATTENTION, FEED FORWARD NETWORK, AND LAYER NORMALIZATION #######################
 class Block(nn.Module):
   def __init__(self, n_embed, n_head):
     super().__init__()
@@ -153,6 +168,7 @@ class Block(nn.Module):
     x = x + self.ffwd(self.ln2(x))
     return x
 
+####################### ACTUAL TRANSFORMER MODEL #######################  
 class BigramLanguageModel(nn.Module):
 
   def __init__(self, vocab_size):
@@ -171,6 +187,7 @@ class BigramLanguageModel(nn.Module):
     )
     self.proj = nn.Linear(NUM_EMBEDDINGS, NUM_EMBEDDINGS)
 
+  ####################### FORWARD FUNCTION FOR TRAINING AND EVALUATION #######################  
   def forward(self, token, targets=None):
     token_embeddings = self.token_embedding_table(token)
     B, T = token.shape
@@ -199,6 +216,7 @@ class BigramLanguageModel(nn.Module):
 #       idx = torch.cat((idx, idx_next), dim=1)
 #     return idx
   
+  ####################### GENERATE FUNCTION FOR GENERATING SEQUENCES GIVEN TOKENS #######################  
   def generate(self, idx, max_new_tokens):
     for _ in range(max_new_tokens):
       idx_cond = idx[:, -BLOCK_SIZE:]
@@ -209,16 +227,20 @@ class BigramLanguageModel(nn.Module):
       idx = torch.cat((idx, idx_next), dim=1)
     return idx
 
+####################### INTIALIZE THE MODEL #######################  
 m = BigramLanguageModel(VOCAB_SIZE)
-# z = torch.zeros((1,1), dtype=torch.long)
-# z[0][0] = random.randint(0, VOCAB_SIZE-1) # randomly seed the first token
-# print(enc.decode(decode_to_ticktokens(m.generate(z, 40)[0].tolist())))
+
+# Restore the model with the saved parameters and weights
+# m.load_state_dict(torch.load('./saved_bigram_language_model.pth'))
+# m.eval()  
+
 
 LEARNING_RATE = 1e-3
 MAX_ITERS = 1000
 EVAL_INTERVAL = 100
 EVAL_ITERS = 100
 
+####################### FUNCTION THAT EVALUATES THE MODEL PERFORMANCE ON TRAINING AND VALIDATION #######################  
 @torch.no_grad()
 def estimate_loss():
   out = {}
@@ -235,6 +257,7 @@ def estimate_loss():
      
 optimizer = torch.optim.Adam(m.parameters(), lr=1e-3)
 
+####################### TRAINING LOOP FOR TRANSFORMER MODEL #######################  
 for iter in range(MAX_ITERS):
 
   if iter % EVAL_INTERVAL == 0:
@@ -249,9 +272,11 @@ for iter in range(MAX_ITERS):
   optimizer.step()
 
 print(f"Final Loss: {loss.item()}")
+torch.save(m.state_dict(), './saved_bigram_language_model.pth')
 
 z = torch.zeros((1,1), dtype=torch.long)
 
+####################### TEST THE MODEL ON AN EXAMPLE INPUT #######################  
 input = "where did they "
 print(input)
 print(enc.encode(input))
@@ -268,5 +293,3 @@ print(enc.decode(decode_to_ticktokens(m.generate(example_token_tensor, 100)[0].t
 #    prediction = enc.decode(decode_to_ticktokens(m.generate(z, 100)[0].tolist()))
 #    prediction = prediction.split('|')[0]
 #    print(f'{i}) {prediction}')
-
-
