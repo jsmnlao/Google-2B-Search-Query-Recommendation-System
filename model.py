@@ -1,3 +1,14 @@
+# TODOS:
+#   * move the training to the GPU using .device()
+#   * save the model to a file after it is trained
+#   * add a flag to load an existing model or train a new one
+#   * train on the full data after we know it is training on GPUs
+#
+# In the end you'll have three or so files:
+#   1) Define the model classes
+#   2) Load the model classes/definition and run training, finally saving the model weights
+#   3) Load the model classes, load the model weights, accept input for seeding prediction and generate results
+
 import nltk
 import pandas as pd
 import numpy as np
@@ -204,7 +215,7 @@ m = BigramLanguageModel(VOCAB_SIZE)
 # print(enc.decode(decode_to_ticktokens(m.generate(z, 40)[0].tolist())))
 
 LEARNING_RATE = 1e-3
-MAX_ITERS = 10000
+MAX_ITERS = 1000
 EVAL_INTERVAL = 100
 EVAL_ITERS = 100
 
@@ -241,10 +252,21 @@ print(f"Final Loss: {loss.item()}")
 
 z = torch.zeros((1,1), dtype=torch.long)
 
-for i in range(10):
-    z[0][0] = random.randint(0, VOCAB_SIZE-1) # randomly seed the first token
-    prediction = enc.decode(decode_to_ticktokens(m.generate(z, 100)[0].tolist()))
-    prediction = prediction.split('|')[0]
-    print(f'{i}) {prediction}')
+input = "where did they "
+print(input)
+print(enc.encode(input))
+input_double_encoded = [encode_ticktokens(enc.encode(input))]
+print(input_double_encoded)
+
+example_token_tensor = torch.tensor(input_double_encoded, dtype=torch.long)
+print(example_token_tensor)
+
+print(enc.decode(decode_to_ticktokens(m.generate(example_token_tensor, 100)[0].tolist())).split('|')[0])
+
+#for i in range(10):
+#    z[0][0] = random.randint(0, VOCAB_SIZE-1) # randomly seed the first token
+#    prediction = enc.decode(decode_to_ticktokens(m.generate(z, 100)[0].tolist()))
+#    prediction = prediction.split('|')[0]
+#    print(f'{i}) {prediction}')
 
 
