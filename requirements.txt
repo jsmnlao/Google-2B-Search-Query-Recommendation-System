@@ -1,0 +1,10 @@
+nltk
+pandas
+numpy
+tiktoken
+openai
+pyarrow
+fastparquet
+huggingface_hub
+torch
+
