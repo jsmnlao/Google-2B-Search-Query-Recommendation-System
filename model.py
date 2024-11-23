@@ -15,6 +15,8 @@ import pandas as pd
 import numpy as np
 import tiktoken
 import torch
+import os
+
 
 nltk.download('punkt')
 
@@ -66,8 +68,7 @@ holdout_size
 
 test_data = training_data_tensor[:holdout_size]
 training_data = training_data_tensor[holdout_size:]
-len(test_data), len(training_data)
-
+print("Length of test_data, training data: ", len(test_data), len(training_data))
 
 BATCH_SIZE = 4
 BLOCK_SIZE = 8
@@ -84,7 +85,7 @@ def get_batch(split):
 # print(get_batch('train'))
 
 VOCAB_SIZE = len(set(training_blob_double_encoded))
-print(VOCAB_SIZE)
+print("VOCAB SIZE: ", VOCAB_SIZE)
 
 import torch
 import torch.nn as nn
@@ -227,13 +228,6 @@ class BigramLanguageModel(nn.Module):
       idx = torch.cat((idx, idx_next), dim=1)
     return idx
 
-####################### INTIALIZE THE MODEL #######################  
-m = BigramLanguageModel(VOCAB_SIZE)
-
-# Restore the model with the saved parameters and weights
-# m.load_state_dict(torch.load('./saved_bigram_language_model.pth'))
-# m.eval()  
-
 
 LEARNING_RATE = 1e-3
 MAX_ITERS = 1000
@@ -254,39 +248,58 @@ def estimate_loss():
     out[split] = losses.mean()
   m.train()
   return out
-     
+
+####################### INTIALIZE THE MODEL #######################  
+m = BigramLanguageModel(VOCAB_SIZE)
 optimizer = torch.optim.Adam(m.parameters(), lr=1e-3)
+saved_model_path = './saved_bigram_language_model.pth'
 
-####################### TRAINING LOOP FOR TRANSFORMER MODEL #######################  
-for iter in range(MAX_ITERS):
+# IF SAVED MODEL FILE EXISTS: Restore the model with the saved parameters and weights
+if os.path.exists(saved_model_path):
+  print(f"Loading saved model parameters from {saved_model_path}...")
+  m.load_state_dict(torch.load(saved_model_path, weights_only=True))
+  m.eval()  
+  
+# ELSE: Start training model and then save to file path
+else:
+  print(f"{saved_model_path} was not found. Starting the training loop from scratch...")
 
-  if iter % EVAL_INTERVAL == 0:
-    losses = estimate_loss()
-    print(f"iter {iter}; train loss {losses['train']:.4f}; val loss {losses['val']:.4f}")
+  ####################### TRAINING LOOP FOR TRANSFORMER MODEL #######################  
+  for iter in range(MAX_ITERS):
 
-  xb, yb = get_batch('train')
+    if iter % EVAL_INTERVAL == 0:
+      losses = estimate_loss()
+      print(f"iter {iter}; train loss {losses['train']:.4f}; val loss {losses['val']:.4f}")
 
-  logits, loss = m(xb, yb)
-  optimizer.zero_grad(set_to_none=True)
-  loss.backward()
-  optimizer.step()
+    xb, yb = get_batch('train')
 
-print(f"Final Loss: {loss.item()}")
-torch.save(m.state_dict(), './saved_bigram_language_model.pth')
+    logits, loss = m(xb, yb)
+    optimizer.zero_grad(set_to_none=True)
+    loss.backward()
+    optimizer.step()
 
-z = torch.zeros((1,1), dtype=torch.long)
+  print(f"Final Loss: {loss.item()}")
+  torch.save(m.state_dict(), saved_model_path)
+  print(f"Model was saved to {saved_model_path}")
 
-####################### TEST THE MODEL ON AN EXAMPLE INPUT #######################  
-input = "where did they "
-print(input)
-print(enc.encode(input))
-input_double_encoded = [encode_ticktokens(enc.encode(input))]
-print(input_double_encoded)
+# z = torch.zeros((1,1), dtype=torch.long)
+
+####################### EVALUATE THE MODEL ON AN EXAMPLE INPUT #######################  
+print("Beginning to evaluate the model on example input...")
+
+input = "where did they film"
+print("Example input: ", input)
+
+input_encoded = enc.encode(input)
+print("First level of encoded input: ", input_encoded)
+
+input_double_encoded = [encode_ticktokens(input_encoded)]
+print("Second level of encoded input: ", input_double_encoded)
 
 example_token_tensor = torch.tensor(input_double_encoded, dtype=torch.long)
-print(example_token_tensor)
+print("Tensor of encoded input: ", example_token_tensor)
 
-print(enc.decode(decode_to_ticktokens(m.generate(example_token_tensor, 100)[0].tolist())).split('|')[0])
+print(enc.decode(decode_to_ticktokens(m.generate(example_token_tensor, 40)[0].tolist())).split('|')[0])
 
 #for i in range(10):
 #    z[0][0] = random.randint(0, VOCAB_SIZE-1) # randomly seed the first token
